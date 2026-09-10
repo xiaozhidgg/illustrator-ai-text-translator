@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <title>AI 文本翻译</title>
+    <link rel="stylesheet" href="css/panel.css" />
+</head>
+
+<body>
+    <div class="app">
+        <!-- ===== 顶部状态 ===== -->
+        <header class="topbar">
+            <div class="brand">
+                <span class="brand-name">AI 文本翻译</span>
+                <span class="brand-ver" id="verLabel">v1.0</span>
+            </div>
+            <div class="host" id="hostStatus">连接中…</div>
+        </header>
+
+        <!-- ===== 基本设置 ===== -->
+        <section class="grid">
+            <label for="scope">范围</label>
+            <select id="scope">
+                <option value="document">整个文档</option>
+                <option value="selection">当前选中</option>
+                <option value="artboard">当前画板</option>
+                <option value="layer">当前图层</option>
+            </select>
+
+            <label for="engine">引擎</label>
+            <select id="engine"></select>
+
+            <label for="sourceLang">源语言</label>
+            <select id="sourceLang"></select>
+
+            <label for="targetLang">目标语言</label>
+            <select id="targetLang"></select>
+
+            <label for="caseMode">输出大小写</label>
+            <select id="caseMode" title="对最终写回的文本统一调整大小写。选「全部大写」即可输出大写英文；原文已是英文而被跳过的段落同样会被转成大写">
+                <option value="keep">保持原样</option>
+                <option value="upper">全部大写（SAVE AS）</option>
+                <option value="lower">全部小写（save as）</option>
+                <option value="title">单词首字母大写（Save As）</option>
+            </select>
+        </section>
+
+        <!-- ===== 高级设置 ===== -->
+        <details class="adv" id="advBox">
+            <summary>引擎设置 / 高级选项</summary>
+
+            <div class="adv-body">
+                <div class="grid">
+                    <label for="preset">模型预设</label>
+                    <select id="preset">
+                        <option value="deepseek">DeepSeek（deepseek-chat）</option>
+                        <option value="zhipu">智谱 GLM-4-Flash（免费额度）</option>
+                        <option value="siliconflow">硅基流动（有免费模型）</option>
+                        <option value="ollama">本地 Ollama</option>
+                        <option value="openai">OpenAI</option>
+                        <option value="">自定义</option>
+                    </select>
+
+                    <label for="apiKey">API Key</label>
+                    <input type="password" id="apiKey" placeholder="选大模型 / DeepL 时必填" />
+
+                    <label for="baseUrl">Base URL</label>
+                    <input type="text" id="baseUrl" placeholder="https://api.deepseek.com/v1" />
+
+                    <label for="model">模型名</label>
+                    <input type="text" id="model" placeholder="deepseek-chat" />
+
+                    <label for="proxy">代理</label>
+                    <div class="inline">
+                        <input type="text" id="proxy" placeholder="http://127.0.0.1:7897（Google 需要）" />
+                        <button type="button" class="mini" id="btnDetectProxy">自动检测</button>
+                    </div>
+                </div>
+
+                <div class="grid">
+                    <label for="overflowPolicy">文本溢出</label>
+                    <select id="overflowPolicy">
+                        <option value="expand">自动放大文本框</option>
+                        <option value="shrink">自动缩小字号</option>
+                        <option value="report">只标记，不修改</option>
+                        <option value="none">不处理</option>
+                    </select>
+
+                    <label for="writeMode">回写方式</label>
+                    <select id="writeMode">
+                        <option value="paragraph">逐段替换（保留每段格式）</option>
+                        <option value="frame">整框替换（保留首字符格式）</option>
+                    </select>
+                </div>
+
+                <div class="checks">
+                    <label><input type="checkbox" id="skipSameLang" checked /> 跳过已是目标语言的文本</label>
+                    <label><input type="checkbox" id="skipPureNumber" checked /> 跳过纯数字 / 符号 / 网址</label>
+                    <label><input type="checkbox" id="includeLocked" /> 包含锁定 / 隐藏对象</label>
+                </div>
+
+                <label class="block-label" for="glossary">术语表（每行一条：原文=译文）</label>
+                <textarea id="glossary" rows="3" placeholder="Design=设计&#10;Layer=图层"></textarea>
+
+                <div class="adv-actions">
+                    <button type="button" class="mini" id="btnDiagnose">网络诊断</button>
+                    <button type="button" class="mini" id="btnReset">恢复默认</button>
+                </div>
+            </div>
+        </details>
+
+        <!-- ===== 操作按钮 ===== -->
+        <div class="actions">
+            <button type="button" id="btnScan">扫描</button>
+            <button type="button" id="btnTranslate" class="primary" disabled>翻译</button>
+            <button type="button" id="btnUndo" disabled>撤销</button>
+            <button type="button" id="btnExport" disabled title="导出为 JSON，可离线翻译后导回">导出</button>
+            <button type="button" id="btnImport" title="导入已翻译的 JSON 并写回画布">导入</button>
+            <input type="file" id="fileInput" accept=".json" style="display:none" />
+        </div>
+
+        <!-- ===== 列表 ===== -->
+        <div class="list-head">
+            <label class="chk-all"><input type="checkbox" id="checkAll" checked /> 全选</label>
+            <span class="counter" id="counter">尚未扫描</span>
+        </div>
+        <div class="list" id="list">
+            <div class="empty">点击「扫描」读取画布中的文本</div>
+        </div>
+
+        <!-- ===== 状态栏 ===== -->
+        <footer class="statusbar">
+            <div class="status" id="status">就绪</div>
+            <div class="progress"><div class="bar" id="progressBar"></div></div>
+        </footer>
+        <div class="log" id="log"></div>
+    </div>
+
+    <script src="js/CSInterface.js"></script>
+    <script src="js/core.js"></script>
+    <script src="js/main.js"></script>
+</body>
+
+</html>

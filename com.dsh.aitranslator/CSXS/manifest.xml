@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!--
+  AI 文本翻译 (CEP 扩展)
+  兼容 Illustrator 2023(27.x) ~ 2025(29.x) 及以后版本
+  RequiredRuntime 声明为 CSXS 9.0，可在 CEP 9/10/11/12 上加载
+-->
+<ExtensionManifest Version="7.0" ExtensionBundleId="com.dsh.aitranslator" ExtensionBundleVersion="1.0.0"
+    ExtensionBundleName="AI 文本翻译" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+    <ExtensionList>
+        <Extension Id="com.dsh.aitranslator.panel" Version="1.0.0" />
+    </ExtensionList>
+    <ExecutionEnvironment>
+        <HostList>
+            <!-- ILST = Illustrator，27.0 = AI 2023，29.x = AI 2025 -->
+            <Host Name="ILST" Version="[27.0,99.9]" />
+        </HostList>
+        <LocaleList>
+            <Locale Code="All" />
+        </LocaleList>
+        <RequiredRuntimeList>
+            <RequiredRuntime Name="CSXS" Version="9.0" />
+        </RequiredRuntimeList>
+    </ExecutionEnvironment>
+    <DispatchInfoList>
+        <Extension Id="com.dsh.aitranslator.panel">
+            <DispatchInfo>
+                <Resources>
+                    <MainPath>./panel/index.html</MainPath>
+                    <ScriptPath>./jsx/translator.jsx</ScriptPath>
+                    <CEFCommandLine>
+                        <!-- 面板内启用 Node.js：网络请求走 Node（无 CORS、可走代理） -->
+                        <Parameter>--enable-nodejs</Parameter>
+                        <Parameter>--mixed-context</Parameter>
+                        <Parameter>--allow-file-access</Parameter>
+                        <Parameter>--allow-file-access-from-files</Parameter>
+                    </CEFCommandLine>
+                </Resources>
+                <Lifecycle>
+                    <AutoVisible>true</AutoVisible>
+                </Lifecycle>
+                <UI>
+                    <Type>Panel</Type>
+                    <Menu>AI 文本翻译</Menu>
+                    <Geometry>
+                        <Size>
+                            <Height>640</Height>
+                            <Width>440</Width>
+                        </Size>
+                        <MinSize>
+                            <Height>420</Height>
+                            <Width>340</Width>
+                        </MinSize>
+                        <MaxSize>
+                            <Height>2400</Height>
+                            <Width>1400</Width>
+                        </MaxSize>
+                    </Geometry>
+                    <Icons />
+                </UI>
+            </DispatchInfo>
+        </Extension>
+    </DispatchInfoList>
+</ExtensionManifest>

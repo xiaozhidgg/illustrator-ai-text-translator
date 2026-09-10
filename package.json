@@ -1,0 +1,19 @@
+{
+  "name": "ai-text-translator",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Adobe Illustrator 2023~2025 文本翻译插件（CEP）：画布文本一键翻译并保留格式",
+  "scripts": {
+    "test": "node tools/test-core.mjs",
+    "test:net": "node tools/test-core.mjs --network",
+    "test:panel": "node tools/test-panel.mjs",
+    "test:e2e": "powershell -ExecutionPolicy Bypass -File tools/e2e/run-e2e.ps1",
+    "test:all": "node tools/test-core.mjs && node tools/test-core.mjs --network && node tools/test-panel.mjs",
+    "install:cep": "powershell -ExecutionPolicy Bypass -File tools/install.ps1",
+    "uninstall:cep": "powershell -ExecutionPolicy Bypass -File tools/install.ps1 -Uninstall",
+    "probe": "node tools/probe-engines.mjs && node tools/probe-engines-2.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "^30.0.1"
+  }
+}

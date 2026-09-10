@@ -1,0 +1,21 @@
+# 依赖与构建产物
+node_modules/
+.npm-cache/
+package-lock.json
+
+# 测试输出（可随时重新生成）
+tools/probe-results*.json
+tools/e2e/*-result.json
+tools/ai-docs-probe.json
+
+# 打包产物
+dist/
+*.zxp
+
+# 系统
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Illustrator 运行时偶发写入的日志
+*.log
