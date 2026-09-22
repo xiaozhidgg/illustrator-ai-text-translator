@@ -4,10 +4,10 @@
   兼容 Illustrator 2023(27.x) ~ 2025(29.x) 及以后版本
   RequiredRuntime 声明为 CSXS 9.0，可在 CEP 9/10/11/12 上加载
 -->
-<ExtensionManifest Version="7.0" ExtensionBundleId="com.dsh.aitranslator" ExtensionBundleVersion="1.1.0"
+<ExtensionManifest Version="7.0" ExtensionBundleId="com.dsh.aitranslator" ExtensionBundleVersion="1.2.0"
     ExtensionBundleName="AI 文本翻译" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
     <ExtensionList>
-        <Extension Id="com.dsh.aitranslator.panel" Version="1.1.0" />
+        <Extension Id="com.dsh.aitranslator.panel" Version="1.2.0" />
     </ExtensionList>
     <ExecutionEnvironment>
         <HostList>

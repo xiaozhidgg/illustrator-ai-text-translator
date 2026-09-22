@@ -1,6 +1,6 @@
 {
   "name": "ai-text-translator",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "description": "Adobe Illustrator 2023~2025 文本翻译插件（CEP）：画布文本一键翻译并保留格式",
   "scripts": {

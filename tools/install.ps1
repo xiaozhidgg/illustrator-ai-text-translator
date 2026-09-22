@@ -96,7 +96,7 @@ Write-Host ''
 Write-Ok '安装完成！接下来的步骤：'
 Write-Host '  1. 完全退出并重新启动 Illustrator'
 Write-Host '  2. 打开菜单：窗口(Window) → 扩展功能(Extensions) → AI 文本翻译'
-Write-Host '  3. 面板顶部应显示 “Illustrator 29.x · 脚本就绪”'
+Write-Host '  3. 面板顶部应显示 “Illustrator <你的版本> · 脚本就绪”（版本号由宿主自己上报，无需手填）'
 Write-Host ''
 Write-Info "安装目录：$Target"
 Write-Info '调试：浏览器打开 http://localhost:8092 可对面板做远程调试'

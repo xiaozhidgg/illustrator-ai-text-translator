@@ -392,9 +392,20 @@ check('语境区块存在（预设下拉 + 输入框 + 分析按钮）',
 const presetOpts = Array.from($('domainPreset').options).map((o) => o.value);
 check('场景预设含「产品包装」并提供多个领域',
   presetOpts.indexOf('packaging') >= 0 && presetOpts.length >= 6, presetOpts.join(','));
+check('场景预设含本厂专用项（九叶 · 日化口腔护理）',
+  presetOpts.indexOf('jiuye') >= 0 && $('domainPreset').options[presetOpts.indexOf('jiuye')].textContent.indexOf('九叶') >= 0,
+  presetOpts.join(','));
 
 $('engine').value = 'tencent';
 $('engine').dispatchEvent(new window.Event('change'));
+$('domainPreset').value = 'jiuye';
+$('domainPreset').dispatchEvent(new window.Event('change'));
+check('选「九叶本厂」预设自动填入日化术语与品牌名',
+  /牙膏/.test($('sceneText').value) && /YATAI/.test($('sceneText').value) && /粤妆20170234/.test($('sceneText').value),
+  $('sceneText').value.slice(0, 60));
+check('本厂预设明确排除食品领域',
+  /不属于食品/.test($('sceneText').value), '含领域排除声明');
+
 $('domainPreset').value = 'packaging';
 $('domainPreset').dispatchEvent(new window.Event('change'));
 check('选预设自动填入场景说明（含包装行业用语）',

@@ -80,7 +80,7 @@ var TX = (function () {
     var registry = {};      // id -> { item, frames, scope, kind }
     var counter = 0;
     var undoStack = [];     // 每步一条快照
-    var VERSION = '1.1.0';
+    var VERSION = '1.2.0';
 
     function uid() { counter++; return 'itm' + counter; }
 

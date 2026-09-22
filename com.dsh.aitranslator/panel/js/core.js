@@ -362,8 +362,20 @@
     { id: '', label: '（通用 / 不指定）', scene: '' },
     {
       id: 'packaging',
-      label: '产品包装（日化 / 个护 / 食品）',
-      scene: '这是产品包装（盒、瓶、袋、管）上的文案，面向终端消费者。要求：简洁有力、符合包装文案惯例，使用行业标准标示语（如 Net Wt.、Directions、Warnings、Ingredients、Keep out of reach of children）；避免逐字直译，单位与量词用目标语言的通用写法。',
+      label: '产品包装（日化 / 个护 / 化妆品）',
+      scene: '这是产品包装（纸盒、瓶、软管、袋子）上的文案，面向终端消费者。行业范围：日用化学品、个人护理、化妆品、口腔护理、家居清洁——不属于食品、餐饮、肉类、药品或医疗器械。要求：简洁有力、符合包装文案惯例，使用目标语言的标准标示语（如 Net Wt.、Directions、Warnings、Ingredients、Made in…）；避免逐字直译，单位与量词用目标语言的通用写法；品牌名与商标保留原文。',
+    },
+    {
+      id: 'jiuye',
+      label: '★ 日化 / 口腔护理（九叶本厂）',
+      scene: [
+        '这是日用化学品与化妆品工厂（广州市九叶化妆品有限公司，成立于 2008 年，化妆品生产许可证 粤妆20170234，参照 ISO 22716 化妆品 GMP）为其客户品牌设计的产品包装文案。',
+        '产品线：牙膏、漱口水、洁牙慕斯、口腔喷雾、沐浴露、洗发水、洗手液、护手霜、爽肤水等口腔护理与个人洗护产品。',
+        '行业归属：日用化学品 / 化妆品 / 口腔护理。不属于食品、餐饮、肉类、药品或医疗器械——选词时严禁借用这些领域的词。',
+        '【行业术语基准】下列概念请用目标语言中化妆品 / 日化行业的规范说法（括号里的英文只是说明概念，不要直接照抄英文）：牙膏（toothpaste）、漱口水（mouthwash）、洁牙慕斯（dental mousse）、口腔喷雾（mouth spray）、沐浴露（body wash）、洗发水（shampoo）、洗手液（hand wash）、护手霜（hand cream）、爽肤水（toner）、活性炭（activated charcoal）、椰壳炭 / 竹炭（charcoal）、竹盐（bamboo salt）、小苏打（baking soda）、氟化物（fluoride）、防蛀（anticavity）、亮白 / 美白（whitening）、去渍（stain removal）、口腔护理（oral care）、口气清新（fresh breath）、深层清洁（deep clean）、表面污渍（surface stains）、净含量（Net Wt.）、香型 / 口味（flavor）。',
+        '【品牌名】以下品牌名与商标必须原样保留，不翻译、不音译：牙泰 / YATAI、康宁、九喜、茗佳物语、恩遇、康普慈、燕豪芬、SALAMANKA、DOBAOLE。',
+        '【标示语惯例】正面主标用目标语言里同品类产品的通用写法；净含量按出口地习惯写作 POIDS NET / NET WT. 一类；成分表、用法、警示语按出口地法规惯例处理。',
+      ].join('\n'),
     },
     {
       id: 'label',
@@ -535,6 +547,13 @@
       lines.push('【同一版面的其他文案（仅用于理解语境，不要翻译，也不要出现在输出里）】');
       lines.push(opts.relatedContext);
     }
+    lines.push('【硬性约束（违反任意一条即为不合格）】');
+    lines.push('- 领域不得漂移：按文案所属行业选词，禁止把成分、材质、包材、工艺类词汇译成其他领域的词' +
+      '（例如不得把 charcoal / 活性炭 译成食品、肉类、餐饮领域的词，不得把 toothpaste 译成食品名）。');
+    lines.push('- 每条都要完整译出：除品牌名、商标、型号、条码、认证编号外，不允许原样保留原文，不允许截断、省略或用省略号代替。');
+    lines.push('- 目标语言语法必须正确：名词的性与数要和冠词、形容词正确配合，单复数、大小写、标点遵循目标语言惯例' +
+      '（例如法语 haleine 为阴性，必须写 haleine fraîche，不能写 haleine frais）。');
+    lines.push('- 同一术语在整批中的译法必须完全一致。');
     lines.push('要求：');
     lines.push('1. 只翻译文本内容，保持原意、语气和专业术语；不要添加解释、不要输出多余内容。');
     lines.push('2. 输出必须是 JSON 字符串数组，长度与输入完全一致，顺序一一对应。');
@@ -544,7 +563,7 @@
         .filter(function (g) { return g && g.from && g.to; })
         .map(function (g) { return g.from + ' → ' + g.to; });
       if (pairs.length) {
-        lines.push('4. 以下术语必须按下述译法翻译：' + pairs.join('；') + '。');
+        lines.push('4. 以下术语必须按下述译法翻译（若某条译法与上述语境明显冲突，以语境为准）：' + pairs.join('；') + '。');
       }
     }
     lines.push('输入：' + JSON.stringify(texts.map(function (t) { return t.text; })));

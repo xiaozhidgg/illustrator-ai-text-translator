@@ -300,6 +300,25 @@ test('领域预设结构合法且覆盖包装场景', () => {
   truthy(/Net Wt\./.test(pk.scene), '包装预设含行业标示语提示（Net Wt.）');
 });
 
+test('包装预设不再把模型引向食品领域（CHARCUTERIE 事故回归）', () => {
+  const pk = core.DOMAIN_PRESETS.find((p) => p.id === 'packaging');
+  truthy(pk.label.indexOf('食品') < 0, `名称里不再出现「食品」，实际「${pk.label}」`);
+  truthy(/不属于食品/.test(pk.scene), '明确声明不属于食品 / 餐饮 / 肉类领域');
+  truthy(/化妆品/.test(pk.scene), '行业范围写明化妆品');
+});
+
+test('本厂专用预设（九叶 · 日化口腔护理）覆盖术语与品牌名', () => {
+  const jy = core.DOMAIN_PRESETS.find((p) => p.id === 'jiuye');
+  truthy(!!jy, '存在九叶本厂预设');
+  truthy(/牙膏/.test(jy.scene) && /toothpaste/.test(jy.scene), '牙膏给出行业基准说法');
+  truthy(/漱口水/.test(jy.scene) && /mouthwash/.test(jy.scene), '漱口水给出行业基准说法');
+  truthy(/粤妆20170234/.test(jy.scene), '写明化妆品生产许可证号');
+  truthy(/ISO 22716/.test(jy.scene), '写明 GMP 依据');
+  truthy(/YATAI/.test(jy.scene) && /SALAMANKA/.test(jy.scene) && /DOBAOLE/.test(jy.scene), '列出必须保留的品牌名');
+  truthy(/不属于食品/.test(jy.scene), '明确排除食品 / 肉类 / 药品领域');
+  truthy(/不要直接照抄英文/.test(jy.scene), '英文基准只作说明，不作为译文');
+});
+
 section('语境：提示词注入');
 
 test('语境写进大模型提示词', () => {
@@ -331,6 +350,37 @@ test('不填语境时提示词不含语境段（向后兼容）', () => {
   truthy(p.indexOf('【语气与风格】') < 0, '不应出现语气段');
   truthy(p.indexOf('【同一版面的其他文案') < 0, '不应出现上下文段');
   truthy(p.indexOf('Save as') >= 0, '仍包含待翻译文本');
+});
+
+test('提示词含硬性约束段：防领域漂移 / 防漏译 / 语法一致', () => {
+  const p = core.buildLlmPrompt([{ text: 'Coconut Charcoal' }], {
+    targetLang: '法语',
+    scene: '日化产品包装',
+  });
+  truthy(p.indexOf('【硬性约束') >= 0, '含硬性约束段');
+  truthy(/领域不得漂移/.test(p), '禁止领域漂移');
+  truthy(/食品、肉类、餐饮/.test(p), '举出跨领域借词的反例（charcoal→食品/肉类）');
+  truthy(/toothpaste/.test(p), '举出 toothpaste 不得译成食品名的反例');
+  truthy(/每条都要完整译出/.test(p), '要求不漏译、不保留原文、不截断');
+  truthy(/品牌名、商标、型号、条码、认证编号/.test(p), '给出允许保留原文的例外清单');
+  truthy(/haleine fraîche/.test(p) && /haleine frais/.test(p), '举出法语性数配合的反例');
+  truthy(/译法必须完全一致/.test(p), '要求术语整批一致');
+});
+
+test('硬性约束不依赖语境，无语境也输出', () => {
+  const p = core.buildLlmPrompt([{ text: 'Deep Clean' }], { targetLang: '法语' });
+  truthy(p.indexOf('【硬性约束') >= 0, '硬性约束无条件输出（语言质量是底线）');
+  truthy(/不能写 haleine frais/.test(p), '约束内容完整');
+});
+
+test('术语表规则留了「语境优先」的逃生口', () => {
+  const p = core.buildLlmPrompt([{ text: 'Charcoal' }], {
+    targetLang: '法语',
+    scene: '日化产品包装',
+    glossary: [{ from: 'Charcoal', to: 'Charcuterie' }],
+  });
+  truthy(p.indexOf('Charcoal → Charcuterie') >= 0, '术语表写进提示词');
+  truthy(p.indexOf('以语境为准') >= 0, '术语与语境冲突时以语境为准');
 });
 
 section('语境：同版面上下文');
