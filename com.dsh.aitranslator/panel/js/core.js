@@ -347,6 +347,173 @@
   }
 
   /* ------------------------------------------------------------------ *
+   * 语境（场景 / 领域）支持
+   *
+   * 目的：让模型知道自己在翻什么。同一条 "Net Wt." 出现在牙膏盒上和出现在
+   * 工业铭牌上，正确译法并不相同。语境通过两条通道影响翻译：
+   *   1) 语境描述（scene）—— 作为指令写给模型看
+   *   2) 同版面上下文（relatedContext）—— 把同一文本框/故事的其他文案一并给它
+   * 只有大模型引擎能接收这两条通道；免费接口（Bing/腾讯/有道…）没有指令通道，
+   * 只能靠术语表近似，见 engines.js 的 supportsContext。
+   * ------------------------------------------------------------------ */
+
+  /** 常见翻译场景预设：一键填充「语境」输入框 */
+  var DOMAIN_PRESETS = [
+    { id: '', label: '（通用 / 不指定）', scene: '' },
+    {
+      id: 'packaging',
+      label: '产品包装（日化 / 个护 / 食品）',
+      scene: '这是产品包装（盒、瓶、袋、管）上的文案，面向终端消费者。要求：简洁有力、符合包装文案惯例，使用行业标准标示语（如 Net Wt.、Directions、Warnings、Ingredients、Keep out of reach of children）；避免逐字直译，单位与量词用目标语言的通用写法。',
+    },
+    {
+      id: 'label',
+      label: '标签 / 铭牌 / 说明书',
+      scene: '这是产品标签、铭牌或说明书的文字，属技术性说明。要求：术语准确统一、语气客观、句式简短；遵循该行业的标准术语与警示语格式。',
+    },
+    {
+      id: 'ui',
+      label: '软件界面 / App / 网站',
+      scene: '这是软件界面文案（菜单、按钮、提示、报错）。要求：简短直接，按钮与菜单尽量不超过 3 个单词，用动词或名词短语、不加句号；遵循目标语言的软件界面惯例。',
+    },
+    {
+      id: 'apparel',
+      label: '服装吊牌 / 洗水标',
+      scene: '这是服装吊牌或洗水标文案。要求：使用纺织服装行业标准用语（如 100% Cotton、Machine Wash Cold、Do Not Bleach、Made in China）。',
+    },
+    {
+      id: 'marketing',
+      label: '广告 / 营销 / 海报',
+      scene: '这是广告营销文案，目标是打动受众。要求：保持号召力与感染力，可意译以保证目标语言读起来地道；品牌名与商标保持原文不译。',
+    },
+    {
+      id: 'game',
+      label: '游戏 / 影视本地化',
+      scene: '这是游戏或影视的本地化文本。要求：贴合角色语气与世界观，使用目标语言受众熟悉的惯用表达；专有名词在全文内保持一致。',
+    },
+    {
+      id: 'medical',
+      label: '医疗 / 器械 / 合规',
+      scene: '这是医疗健康或器械相关文案，涉及合规。要求：严谨准确、不夸大，避免绝对化表述，使用规范医学术语。',
+    },
+    {
+      id: 'industrial',
+      label: '工业 / 机械 / 工程图',
+      scene: '这是工业或机械工程文字（零件名、工序、图注）。要求：使用工程领域标准术语，名词化、极简，避免口语化表达。',
+    },
+    {
+      id: 'legal',
+      label: '合同 / 法律文件',
+      scene: '这是合同或法律文件条款。要求：使用法律文书的标准表述与固定句式，保留条款编号，严谨且不产生歧义。',
+    },
+  ];
+
+  /**
+   * 组装「同一版面的其他文案」上下文。
+   * 同一批要翻译的条目往往来自同一个文本框/同一个故事，把那些对象的完整文案一并
+   * 交给模型，它才判断得出这是在翻牙膏盒还是 App 按钮。
+   * @param {Array} batch      plan.unique 里的若干条，含 refs:[{itemId,paraIndex}]
+   * @param {object} itemsById {itemId: item}，item 含 paragraphs:[{i,text}]
+   * @param {number} maxChars  上下文长度上限，默认 1200
+   * @returns {string} 每个对象一行的完整文案；无线索时返回 ''
+   */
+  function buildRelatedContext(batch, itemsById, maxChars) {
+    if (!batch || !itemsById) return '';
+    var limit = maxChars || 1200;
+    var seen = {};
+    var order = [];
+    var i, j, k, p;
+    for (i = 0; i < batch.length; i++) {
+      var refs = (batch[i] && batch[i].refs) || [];
+      for (j = 0; j < refs.length; j++) {
+        var id = refs[j].itemId;
+        if (id === undefined || id === null || seen[id]) continue;
+        seen[id] = true;
+        order.push(id);
+      }
+    }
+    var blocks = [];
+    var used = 0;
+    for (k = 0; k < order.length; k++) {
+      var item = itemsById[order[k]];
+      if (!item) continue;
+      var paras = item.paragraphs || [];
+      var texts = [];
+      for (p = 0; p < paras.length; p++) {
+        var t = String(paras[p].text === null || paras[p].text === undefined ? '' : paras[p].text)
+          .replace(/\s+/g, ' ').replace(/^\s+|\s+$/g, '');
+        if (!t) continue;
+        if (used + t.length > limit) break;
+        texts.push(t);
+        used += t.length;
+      }
+      if (texts.length) blocks.push(texts.join(' / '));
+      if (used >= limit) break;
+    }
+    return blocks.join('\n');
+  }
+
+  /** 让模型先读一遍画布文字，推断这是什么场景、该用什么术语 */
+  function buildContextAnalysisPrompt(samples, opts) {
+    opts = opts || {};
+    var target = opts.targetLangLabel || opts.targetLang || '目标语言';
+    var lines = [];
+    lines.push('下面是一个设计稿（画布）里的全部文字，请先分析这是什么产品/场景，再给出翻译它所需的语境信息。');
+    if (opts.hint) lines.push('用户补充说明：' + opts.hint);
+    lines.push('只输出一个 JSON 对象，不要输出任何解释、不要用 Markdown 代码块，格式严格为：');
+    lines.push('{"scene":"这是什么类型的产品/场景、这些文字的用途","tone":"应当采用的语气与风格",' +
+      '"glossary":[{"from":"原文术语","to":"' + target + '建议译法"}]}');
+    lines.push('要求：scene 与 tone 各不超过 80 字，直接写给翻译者看；glossary 给出 5-15 条关键术语' +
+      '（品牌名/商标保留原文时，to 填同样的写法）；若完全看不出场景，scene 填空字符串。');
+    lines.push('文字内容：');
+    lines.push(JSON.stringify(samples || []));
+    return lines.join('\n');
+  }
+
+  /** 从模型输出里稳健地取出语境分析结果 */
+  function parseContextAnalysis(raw) {
+    var s = String(raw || '');
+    var candidates = [];
+    var fence = s.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fence) candidates.push(fence[1]);
+    candidates.push(s);
+    var a = s.indexOf('{');
+    var b = s.lastIndexOf('}');
+    if (a !== -1 && b > a) candidates.push(s.slice(a, b + 1));
+
+    for (var i = 0; i < candidates.length; i++) {
+      var v;
+      try { v = JSON.parse(candidates[i]); } catch (e) { continue; }
+      if (!v || typeof v !== 'object' || Array.isArray(v)) continue;
+      var glossary = [];
+      var src = v.glossary || v.terms || [];
+      if (Array.isArray(src)) {
+        for (var g = 0; g < src.length; g++) {
+          var it = src[g];
+          if (!it) continue;
+          var from = String(it.from || it.source || it.src || '').replace(/^\s+|\s+$/g, '');
+          var to = String(it.to || it.target || it.dst || '').replace(/^\s+|\s+$/g, '');
+          if (from && to) glossary.push({ from: from, to: to });
+        }
+      }
+      return {
+        scene: String(v.scene || '').replace(/^\s+|\s+$/g, ''),
+        tone: String(v.tone || '').replace(/^\s+|\s+$/g, ''),
+        glossary: glossary,
+      };
+    }
+    throw new Error('无法从模型输出解析语境分析结果');
+  }
+
+  /** 把 scene / tone 合成写入「语境」输入框的文本 */
+  function composeSceneText(scene, tone) {
+    var s = String(scene || '').replace(/^\s+|\s+$/g, '');
+    var t = String(tone || '').replace(/^\s+|\s+$/g, '');
+    if (!t) return s;
+    if (!s) return '语气与风格：' + t;
+    return s + '\n语气与风格：' + t;
+  }
+
+  /* ------------------------------------------------------------------ *
    * LLM 提示词
    * ------------------------------------------------------------------ */
   function buildLlmPrompt(texts, opts) {
@@ -357,6 +524,17 @@
     var lines = [];
     lines.push('你是专业的平面设计文案翻译。把下面 JSON 数组中的每一条文本翻译成 ' + target + '。');
     lines.push('源语言：' + source + '。');
+    if (opts.scene) {
+      lines.push('【语境】' + opts.scene);
+      lines.push('翻译必须贴合上述语境：选词、句式、标示语都要符合该场景在目标语言里的惯例。');
+    }
+    if (opts.tone) {
+      lines.push('【语气与风格】' + opts.tone);
+    }
+    if (opts.relatedContext) {
+      lines.push('【同一版面的其他文案（仅用于理解语境，不要翻译，也不要出现在输出里）】');
+      lines.push(opts.relatedContext);
+    }
     lines.push('要求：');
     lines.push('1. 只翻译文本内容，保持原意、语气和专业术语；不要添加解释、不要输出多余内容。');
     lines.push('2. 输出必须是 JSON 字符串数组，长度与输入完全一致，顺序一一对应。');
@@ -394,5 +572,10 @@
     caseTransformAllowed: caseTransformAllowed,
     caseChanges: caseChanges,
     buildLlmPrompt: buildLlmPrompt,
+    DOMAIN_PRESETS: DOMAIN_PRESETS,
+    buildRelatedContext: buildRelatedContext,
+    buildContextAnalysisPrompt: buildContextAnalysisPrompt,
+    parseContextAnalysis: parseContextAnalysis,
+    composeSceneText: composeSceneText,
   };
 });

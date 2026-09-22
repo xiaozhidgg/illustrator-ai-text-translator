@@ -14,7 +14,7 @@
         <header class="topbar">
             <div class="brand">
                 <span class="brand-name">AI 文本翻译</span>
-                <span class="brand-ver" id="verLabel">v1.0</span>
+                <span class="brand-ver" id="verLabel">v1.1</span>
             </div>
             <div class="host" id="hostStatus">连接中…</div>
         </header>
@@ -45,6 +45,26 @@
                 <option value="lower">全部小写（save as）</option>
                 <option value="title">单词首字母大写（Save As）</option>
             </select>
+        </section>
+
+        <!-- ===== 语境（场景）===== -->
+        <section class="context-box">
+            <div class="ctx-head">
+                <span class="ctx-title" title="让模型知道自己在翻什么：牙膏盒包装、App 界面、服装洗水标的正确译法并不相同">语境翻译</span>
+                <span class="ctx-badge off" id="ctxBadge">未启用</span>
+            </div>
+            <div class="ctx-row">
+                <label for="domainPreset">场景</label>
+                <select id="domainPreset" title="选择场景会自动填写下方说明，可再自行改写"></select>
+            </div>
+            <textarea id="sceneText" rows="3"
+                placeholder="告诉模型这是什么，例如：&#10;牙膏盒包装文案，日化产品，面向终端消费者，使用包装惯例用语（Net Wt. / Directions / Ingredients）"></textarea>
+            <div class="ctx-actions">
+                <button type="button" class="mini" id="btnAnalyzeScene"
+                    title="用大模型读一遍画布上的文字，自动推断场景并生成术语表（需先扫描，且需配置大模型引擎）">分析画布</button>
+                <button type="button" class="mini" id="btnClearScene">清空</button>
+                <span class="ctx-hint" id="ctxHint"></span>
+            </div>
         </section>
 
         <!-- ===== 高级设置 ===== -->

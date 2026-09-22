@@ -39,6 +39,12 @@
     return row[engineId] !== undefined ? row[engineId] : lang;
   }
 
+  /** 语言代码 → 给模型看的自然语言名称（en → 英语，auto → 自动识别） */
+  function langLabel(lang) {
+    var row = LANGS[lang];
+    return (row && row.llm) || lang || '自动识别';
+  }
+
   function form(obj) {
     return Object.keys(obj)
       .filter(function (k) { return obj[k] !== undefined && obj[k] !== null; })
@@ -356,37 +362,31 @@
     ollama: { baseUrl: 'http://127.0.0.1:11434/v1', model: 'qwen2.5:7b' },
   };
 
-  async function llmTranslate(texts, ctx) {
-    if (!ctx.apiKey && !/127\.0\.0\.1|localhost/.test(ctx.baseUrl || '')) {
-      throw new Error('该引擎需要 API Key');
-    }
+  function llmEndpoint(ctx) {
     var preset = PRESETS[ctx.preset] || {};
     var baseUrl = (ctx.baseUrl || preset.baseUrl || '').replace(/\/+$/, '');
-    var model = ctx.model || preset.model || 'deepseek-chat';
     if (!baseUrl) throw new Error('缺少 API Base URL');
+    return { baseUrl: baseUrl, model: ctx.model || preset.model || 'deepseek-chat' };
+  }
 
-    var prompt = core.buildLlmPrompt(
-      texts.map(function (t) { return { text: t }; }),
-      { targetLang: ctx.targetLangLabel || ctx.targetLang, sourceLang: ctx.sourceLang, glossary: ctx.glossary }
-    );
+  function llmKeyOk(ctx) {
+    return !!ctx.apiKey || /127\.0\.0\.1|localhost/.test(ctx.baseUrl || '');
+  }
 
-    var body = {
-      model: model,
-      temperature: 0.2,
-      messages: [
-        { role: 'system', content: '你是专业翻译，只输出 JSON 字符串数组，不输出任何解释。' },
-        { role: 'user', content: prompt },
-      ],
-    };
-
+  /** 一次 OpenAI 兼容的对话请求，返回文本内容 */
+  async function llmChat(messages, ctx) {
+    var ep = llmEndpoint(ctx);
     var headers = { 'content-type': 'application/json' };
     if (ctx.apiKey) headers.authorization = 'Bearer ' + ctx.apiKey;
-
     var res = await http.request({
-      url: baseUrl + '/chat/completions',
+      url: ep.baseUrl + '/chat/completions',
       method: 'POST',
       headers: headers,
-      body: body,
+      body: {
+        model: ep.model,
+        temperature: ctx.temperature === undefined ? 0.2 : ctx.temperature,
+        messages: messages,
+      },
       proxy: ctx.proxy,
       timeout: ctx.llmTimeout || 120000,
       retries: 1,
@@ -397,46 +397,96 @@
     if (data.error) throw new Error('模型接口报错：' + (data.error.message || JSON.stringify(data.error)).slice(0, 200));
     var content = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
     if (!content) throw new Error('模型返回为空');
+    return content;
+  }
+
+  async function llmTranslate(texts, ctx) {
+    if (!llmKeyOk(ctx)) throw new Error('该引擎需要 API Key');
+    var prompt = core.buildLlmPrompt(
+      texts.map(function (t) { return { text: t }; }),
+      {
+        targetLang: ctx.targetLangLabel || ctx.targetLang,
+        sourceLang: langLabel(ctx.sourceLang),
+        glossary: ctx.glossary,
+        scene: ctx.scene,
+        tone: ctx.tone,
+        relatedContext: ctx.relatedContext,
+      }
+    );
+    var content = await llmChat([
+      { role: 'system', content: '你是专业翻译，只输出 JSON 字符串数组，不输出任何解释。' },
+      { role: 'user', content: prompt },
+    ], ctx);
     return core.parseTranslationArray(content, texts.length);
+  }
+
+  /**
+   * 语境分析：把画布上的文字交给大模型，推断这是什么产品/场景，
+   * 并顺带产出术语表。
+   * @param {Array<string>} samples 画布文字样本
+   * @param {object} ctx 同 translateBatch 的 ctx
+   * @returns {Promise<{scene:string,tone:string,glossary:Array}>}
+   */
+  async function analyzeContext(samples, ctx) {
+    if (!llmKeyOk(ctx)) {
+      throw new Error('语境分析需要大模型引擎：请在设置中选择「AI 大模型」并填入 API Key（智谱 GLM-4-Flash 免费）');
+    }
+    var prompt = core.buildContextAnalysisPrompt(samples, ctx);
+    var content = await llmChat([
+      { role: 'system', content: '你是资深本地化专家，只输出一个 JSON 对象，不输出任何解释。' },
+      { role: 'user', content: prompt },
+    ], ctx);
+    return core.parseContextAnalysis(content);
   }
 
   /* ================================================================
    * 引擎注册表
+   *
+   * supportsContext：能否接收「语境描述 + 同版面上下文」。
+   * 只有大模型引擎有指令通道；腾讯/Bing/有道/Google/MyMemory/DeepL 是纯
+   * 翻译接口，无法接收场景说明，只能靠术语表近似。
    * ================================================================ */
   var ENGINES = {
     bing: {
       id: 'bing', name: 'Bing 微软翻译', free: true, needsKey: false,
       maxItems: 1, maxChars: 1000, note: '免费免 Key，质量高；逐条串行请求',
+      supportsContext: false,
       translate: bingTranslate,
     },
     tencent: {
       id: 'tencent', name: '腾讯交互翻译', free: true, needsKey: false,
       maxItems: 40, maxChars: 4000, note: '免费免 Key，支持批量，速度快',
+      supportsContext: false,
       translate: tencentTranslate,
     },
     youdao: {
       id: 'youdao', name: '有道翻译（免费接口）', free: true, needsKey: false,
       maxItems: 1, maxChars: 1500, note: '免费免 Key，响应快；限流严格，已自动串行',
+      supportsContext: false,
       translate: youdaoTranslate,
     },
     google: {
       id: 'google', name: 'Google 免费接口', free: true, needsKey: false,
       maxItems: 1, maxChars: 1500, note: '免费免 Key，国内需代理',
+      supportsContext: false,
       translate: googleTranslate,
     },
     mymemory: {
       id: 'mymemory', name: 'MyMemory（免费额度）', free: true, needsKey: false,
       maxItems: 1, maxChars: 500, note: '免费免 Key，匿名每天 1000 词额度',
+      supportsContext: false,
       translate: myMemoryTranslate,
     },
     deepl: {
       id: 'deepl', name: 'DeepL（需 Key）', free: false, needsKey: true,
       maxItems: 40, maxChars: 4000, note: 'DeepL API Free，每月 50 万字符',
+      supportsContext: false,
       translate: deeplTranslate,
     },
     openai: {
       id: 'openai', name: 'AI 大模型（需 Key）', free: false, needsKey: true,
       maxItems: 30, maxChars: 3000, note: 'DeepSeek / 智谱 GLM-4-Flash（免费）/ 硅基流动 / Ollama 本地模型',
+      supportsContext: true,
       translate: llmTranslate,
     },
   };
@@ -450,8 +500,16 @@
       return {
         id: e.id, name: e.name, free: e.free, needsKey: e.needsKey,
         maxItems: e.maxItems, maxChars: e.maxChars, note: e.note,
+        supportsContext: !!e.supportsContext,
       };
     });
+  }
+
+  /** 该引擎是否支持语境（'auto' 不支持：它会在免费引擎里降级） */
+  function supportsContext(engineId) {
+    if (!engineId || engineId === 'auto') return false;
+    var e = ENGINES[engineId];
+    return !!(e && e.supportsContext);
   }
 
   /** 按引擎限制把 unique 文本分批 */
@@ -499,7 +557,13 @@
         for (var b = 0; b < batches.length; b++) {
           var batch = batches[b];
           var texts = batch.map(function (x) { return x.text; });
-          var out = await engine.translate(texts, ctx);
+          // 支持语境的引擎：把同版面其他文案一并给它做上下文
+          var callCtx = ctx;
+          if (engine.supportsContext && ctx && ctx.itemsById) {
+            var related = core.buildRelatedContext(batch, ctx.itemsById, ctx.contextMaxChars);
+            if (related) callCtx = Object.assign({}, ctx, { relatedContext: related });
+          }
+          var out = await engine.translate(texts, callCtx);
           if (!out || out.length !== texts.length) {
             throw new Error('译文数量不匹配（期望 ' + texts.length + '，得到 ' + (out ? out.length : 0) + '）');
           }
@@ -546,9 +610,12 @@
     ENGINES: ENGINES,
     AUTO_ORDER: AUTO_ORDER,
     engineList: engineList,
+    supportsContext: supportsContext,
     langOf: langOf,
+    langLabel: langLabel,
     batchesFor: batchesFor,
     translateBatch: translateBatch,
+    analyzeContext: analyzeContext,
     diagnose: diagnose,
   };
 });

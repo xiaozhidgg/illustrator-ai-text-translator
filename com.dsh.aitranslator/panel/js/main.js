@@ -183,6 +183,7 @@
         'scope', 'engine', 'sourceLang', 'targetLang', 'caseMode', 'preset', 'apiKey',
         'baseUrl', 'model', 'proxy', 'overflowPolicy', 'writeMode',
         'skipSameLang', 'skipPureNumber', 'includeLocked', 'glossary',
+        'sceneText', 'domainPreset',
     ];
 
     function saveSettings() {
@@ -233,6 +234,8 @@
             skipPureNumber: $('skipPureNumber').checked,
             includeLocked: $('includeLocked').checked,
             glossary: glossary,
+            scene: $('sceneText') ? $('sceneText').value.trim() : '',
+            domainPreset: $('domainPreset') ? $('domainPreset').value : '',
         };
     }
 
@@ -281,12 +284,189 @@
     function updateEngineHint() {
         var id = $('engine').value;
         if (!TXEngines) return;
+        updateContextBadge();
         if (id === 'auto') {
             setStatus('自动模式：' + TXEngines.AUTO_ORDER.join(' → '));
             return;
         }
         var e = TXEngines.ENGINES[id];
         if (e) setStatus(e.name + '：' + e.note);
+    }
+
+    /* ================================================================
+     * 语境（场景 / 领域）
+     *
+     * 语境只对大模型引擎有效：把「这是什么」写给模型看，让它按该场景的
+     * 惯例选词（牙膏盒上的 Net Wt. 与工业铭牌上的净重写法不同）。
+     * 免费接口（腾讯/Bing/有道/Google/MyMemory）没有指令通道，只能靠术语表近似。
+     * ================================================================ */
+
+    function presetById(id) {
+        var list = (TXCore && TXCore.DOMAIN_PRESETS) || [];
+        for (var i = 0; i < list.length; i++) {
+            if (list[i].id === id) return list[i];
+        }
+        return null;
+    }
+
+    function initDomainPresets() {
+        var sel = $('domainPreset');
+        if (!sel || !TXCore || !TXCore.DOMAIN_PRESETS) return;
+        TXCore.DOMAIN_PRESETS.forEach(function (p) {
+            var o = document.createElement('option');
+            o.value = p.id;
+            o.textContent = p.label;
+            sel.appendChild(o);
+        });
+        sel.value = '';
+    }
+
+    /** 选中场景预设时把说明填进语境输入框（用户可再自行改写） */
+    function applyPreset(id) {
+        var p = presetById(id);
+        if (!p || !p.scene) return;
+        var box = $('sceneText');
+        if (!box) return;
+        box.value = TXCore.composeSceneText(p.scene, '');
+        updateContextBadge();
+    }
+
+    /** 更新「语境」区块的启用状态徽标 */
+    function updateContextBadge() {
+        var badge = $('ctxBadge');
+        var hint = $('ctxHint');
+        if (!badge) return;
+        var box = $('sceneText');
+        var scene = box ? box.value.trim() : '';
+        var supported = !!(TXEngines && TXEngines.supportsContext($('engine').value));
+
+        if (!scene) {
+            badge.className = 'ctx-badge off';
+            badge.textContent = '未启用';
+            if (hint) hint.textContent = supported ? '已选大模型引擎，填写语境即可生效' : '';
+            return;
+        }
+        if (supported) {
+            badge.className = 'ctx-badge on';
+            badge.textContent = '已启用';
+            if (hint) hint.textContent = '';
+        } else {
+            badge.className = 'ctx-badge off';
+            badge.textContent = '当前引擎不支持';
+            if (hint) hint.textContent = '切到「AI 大模型」才会生效';
+        }
+    }
+
+    /** 把模型给出的术语并入术语表输入框（跳过已存在的原文） */
+    function mergeGlossary(list) {
+        var box = $('glossary');
+        if (!box || !list || !list.length) return 0;
+        var existing = {};
+        (box.value || '').split(/\r?\n/).forEach(function (line) {
+            var i = line.indexOf('=');
+            if (i > 0) existing[line.slice(0, i).trim()] = true;
+        });
+        var added = 0;
+        var lines = box.value.trim() ? box.value.replace(/\s+$/, '').split(/\r?\n/) : [];
+        list.forEach(function (g) {
+            if (!g || !g.from || !g.to || existing[g.from]) return;
+            existing[g.from] = true;
+            lines.push(g.from + '=' + g.to);
+            added++;
+        });
+        if (added) box.value = lines.join('\n');
+        return added;
+    }
+
+    /**
+     * 「分析画布」：把扫描到的文字交给大模型，推断这是什么场景、该用什么术语。
+     * 结果回填语境输入框，术语表并入术语表输入框。
+     */
+    async function doAnalyzeScene() {
+        if (!hostReady) { setStatus('宿主脚本未就绪，无法分析', 'err'); return; }
+        if (!TXEngines) { setStatus('网络层未加载，请检查 manifest 的 Node 配置', 'err'); return; }
+
+        var opts = readOptions();
+        if (!TXEngines.supportsContext(opts.engine)) {
+            setStatus('「分析画布」需要大模型引擎：请在「引擎」中选择「AI 大模型」并填入 API Key', 'warn');
+            log('语境分析需要大语言模型。免费接口（腾讯 / Bing / 有道 / Google / MyMemory）是纯翻译接口，' +
+                '没有接收指令的通道，无法理解场景。可用智谱 GLM-4-Flash（免费额度）或本地 Ollama。', 'warn');
+            return;
+        }
+
+        var run = async function () {
+            var items = state.items.filter(function (it) { return state.checked[it.id]; });
+            if (!items.length) { setStatus('请先扫描并勾选要分析的文本', 'warn'); return; }
+
+            // 取样：跨对象去重 + 限量，避免把整份文档塞给模型
+            var seen = {};
+            var samples = [];
+            var chars = 0;
+            for (var i = 0; i < items.length; i++) {
+                var paras = items[i].paragraphs || [];
+                for (var p = 0; p < paras.length; p++) {
+                    var t = String(paras[p].text === null || paras[p].text === undefined ? '' : paras[p].text)
+                        .replace(/\s+/g, ' ').trim();
+                    if (!t || seen[t]) continue;
+                    seen[t] = true;
+                    samples.push(t);
+                    chars += t.length;
+                    if (samples.length >= 120 || chars >= 3000) break;
+                }
+                if (samples.length >= 120 || chars >= 3000) break;
+            }
+            if (!samples.length) { setStatus('没有可分析的文本', 'warn'); return; }
+
+            busy(true);
+            setProgress(0.3);
+            setStatus('正在分析画布语境（' + samples.length + ' 条文字）…');
+
+            var ctx = {
+                targetLang: opts.targetLang,
+                targetLangLabel: (TXEngines.LANGS[opts.targetLang] || {}).llm || opts.targetLang,
+                hint: opts.scene || '',
+                preset: opts.preset,
+                apiKey: opts.apiKey,
+                baseUrl: opts.baseUrl,
+                model: opts.model,
+                proxy: opts.proxy,
+                temperature: 0.3,
+                log: function (m) { log(m, 'warn'); },
+            };
+
+            try {
+                var r = await TXEngines.analyzeContext(samples, ctx);
+                busy(false);
+                setProgress(0);
+
+                var text = TXCore.composeSceneText(r.scene, r.tone);
+                if (text) {
+                    $('sceneText').value = text;
+                } else {
+                    log('模型没有判断出明确场景，请手动填写语境', 'warn');
+                }
+                var added = mergeGlossary(r.glossary);
+                saveSettings();
+                updateContextBadge();
+
+                var msg = '语境分析完成';
+                if (text) msg += '，已填入语境';
+                if (added) msg += '，新增术语 ' + added + ' 条（可自行编辑）';
+                setStatus(msg, 'ok');
+                log(msg, 'ok');
+                if (r.glossary && r.glossary.length && !added) {
+                    log('模型给出的 ' + r.glossary.length + ' 条术语都已在术语表中', 'ok');
+                }
+            } catch (e) {
+                busy(false);
+                setProgress(0);
+                setStatus('语境分析失败：' + e.message, 'err');
+                log('语境分析失败：' + e.message, 'err');
+            }
+        };
+
+        // 还没扫描就先静默扫一次，再分析
+        if (!state.items.length) scan({ silent: true }, run); else run();
     }
 
     function initHost() {
@@ -504,6 +684,13 @@
         var items = state.items.filter(function (it) { return state.checked[it.id]; });
         if (!items.length) { setStatus('请先勾选要翻译的对象', 'warn'); return; }
 
+        // 语境只对大模型引擎生效：提前说清楚，免得用户以为填了没作用
+        var ctxSupported = TXEngines.supportsContext(opts.engine);
+        if (opts.scene && !ctxSupported) {
+            log('已填写语境，但当前引擎（' + engineName(opts.engine) + '）是纯翻译接口，没有接收指令的通道，' +
+                '语境不会生效（术语表仍然有效）。要启用语境请把「引擎」切换为「AI 大模型」。', 'warn');
+        }
+
         // 1. 规划任务（过滤 + 去重 + 分批）
         var plan = TXCore.planTasks(items, {
             targetLang: opts.targetLang,
@@ -547,6 +734,9 @@
             setStatus('准备翻译 ' + plan.unique.length + ' 条（原始 ' + plan.stats.paragraphCount + ' 段，去重省下 ' +
                 plan.stats.savedByDedupe + ' 条）…');
 
+            var itemsById = {};
+            items.forEach(function (it) { itemsById[it.id] = it; });
+
             var ctx = {
                 targetLang: opts.targetLang,
                 targetLangLabel: (TXEngines.LANGS[opts.targetLang] || {}).llm || opts.targetLang,
@@ -557,6 +747,10 @@
                 model: opts.model,
                 preset: opts.preset,
                 glossary: opts.glossary,
+                // 语境：只有支持语境的引擎（大模型）会读这两个字段
+                scene: opts.scene,
+                sceneEnabled: ctxSupported && !!opts.scene,
+                itemsById: itemsById,
                 log: function (m) { log(m, 'warn'); },
                 onProgress: function (done, total) {
                     setProgress(0.05 + 0.75 * (done / Math.max(1, total)));
@@ -885,6 +1079,23 @@
             state.items.forEach(function (it) { state.checked[it.id] = v; });
             renderList();
         });
+        on('domainPreset', 'change', function () {
+            applyPreset($('domainPreset').value);
+            saveSettings();
+        });
+        on('sceneText', 'input', updateContextBadge);
+        on('sceneText', 'change', function () {
+            updateContextBadge();
+            saveSettings();
+        });
+        on('btnAnalyzeScene', 'click', doAnalyzeScene);
+        on('btnClearScene', 'click', function () {
+            $('sceneText').value = '';
+            $('domainPreset').value = '';
+            updateContextBadge();
+            saveSettings();
+            setStatus('已清空语境', 'ok');
+        });
         on('fileInput', 'change', function (e) {
             if (e.target.files && e.target.files[0]) doImport(e.target.files[0]);
             e.target.value = '';
@@ -899,13 +1110,15 @@
      * 启动
      * ================================================================ */
     function boot() {
-        $('verLabel').textContent = 'v1.0';
+        $('verLabel').textContent = 'v1.1';
         initLangSelects();
         var nodeOk = loadNodeModules();
         initEngineSelect();
+        initDomainPresets();
         loadSettings();
         bindEvents();
         updateEngineHint();
+        updateContextBadge();
         initHost();
 
         if (!nodeOk) {

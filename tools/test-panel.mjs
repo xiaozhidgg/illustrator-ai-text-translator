@@ -159,6 +159,11 @@ function handleScript(script) {
  * ------------------------------------------------------------------ */
 const TXHttp = require(path.join(extRoot, 'panel', 'js', 'http.js'));
 let httpCalls = 0;
+// 记录发给大模型端点的请求，用来断言「语境真的进了提示词」
+const llmBodies = [];
+// 假模型回复：按 system 提示词区分「翻译」与「语境分析」两种调用
+const MOCK_SCENE = '画布上是牙膏盒包装文案，日化产品，面向终端消费者';
+const MOCK_TERMS = [{ from: 'Net wt.', to: '净含量' }];
 
 TXHttp.request = async function (o) {
   httpCalls++;
@@ -177,6 +182,32 @@ TXHttp.request = async function (o) {
         src_lang: 'en',
         tgt_lang: 'zh',
       }),
+      channel: 'mock',
+      cookies: [],
+    };
+  }
+  if (url.indexOf('/chat/completions') >= 0) {
+    const body = typeof o.body === 'string' ? JSON.parse(o.body) : o.body;
+    llmBodies.push(body);
+    const sys = (body.messages[0] && body.messages[0].content) || '';
+    const user = (body.messages[1] && body.messages[1].content) || '';
+    let content;
+    if (sys.indexOf('本地化专家') >= 0) {
+      // 语境分析
+      content = JSON.stringify({ scene: MOCK_SCENE, tone: '简洁有力', glossary: MOCK_TERMS });
+    } else {
+      // 翻译：元素个数必须与请求条数一致
+      const n = (user.match(/^ {2}"|\n {2}"/g) || []).length || 1;
+      const srcs = (user.split('\n输入：')[1] || '[]');
+      let texts = [];
+      try { texts = JSON.parse(srcs.trim()); } catch (e) { texts = []; }
+      content = JSON.stringify((texts.length ? texts : new Array(n).fill('x')).map((t) => '【模】' + t));
+    }
+    return {
+      status: 200,
+      headers: {},
+      ms: 30,
+      text: JSON.stringify({ choices: [{ message: { role: 'assistant', content } }] }),
       channel: 'mock',
       cookies: [],
     };
@@ -351,6 +382,96 @@ $('btnDiagnose').click();
 const diagDone = await waitFor(() => /诊断完成/.test($('status').textContent) ? true : null, 8000);
 check('诊断完成并写入日志', !!diagDone && doc.querySelectorAll('#log div').length > 0,
   String(doc.querySelectorAll('#log div').length));
+
+/* ------------------------------------------------------------------ *
+ * 语境翻译（大模型）
+ * ------------------------------------------------------------------ */
+console.log('\n=== 语境：预设选择与能力徽标 ===');
+check('语境区块存在（预设下拉 + 输入框 + 分析按钮）',
+  !!$('domainPreset') && !!$('sceneText') && !!$('btnAnalyzeScene'));
+const presetOpts = Array.from($('domainPreset').options).map((o) => o.value);
+check('场景预设含「产品包装」并提供多个领域',
+  presetOpts.indexOf('packaging') >= 0 && presetOpts.length >= 6, presetOpts.join(','));
+
+$('engine').value = 'tencent';
+$('engine').dispatchEvent(new window.Event('change'));
+$('domainPreset').value = 'packaging';
+$('domainPreset').dispatchEvent(new window.Event('change'));
+check('选预设自动填入场景说明（含包装行业用语）',
+  /Net Wt\./.test($('sceneText').value), $('sceneText').value.slice(0, 60));
+check('免费引擎下语境徽标显示不支持',
+  $('ctxBadge').textContent === '当前引擎不支持' && /ctx-badge off/.test($('ctxBadge').className),
+  `${$('ctxBadge').textContent} / ${$('ctxBadge').className}`);
+
+$('engine').value = 'openai';
+$('engine').dispatchEvent(new window.Event('change'));
+check('切到大模型引擎后语境徽标变为已启用',
+  $('ctxBadge').textContent === '已启用' && /ctx-badge on/.test($('ctxBadge').className),
+  `${$('ctxBadge').textContent} / ${$('ctxBadge').className}`);
+
+/* ---------- 关键：语境真的进了发给模型的提示词 ---------- */
+console.log('\n=== 语境：真的进了大模型提示词 ===');
+$('apiKey').value = 'test-key';
+$('baseUrl').value = 'https://api.deepseek.com/v1';
+$('model').value = 'deepseek-chat';
+$('btnScan').click();
+await waitIdle();
+llmBodies.length = 0;
+$('btnTranslate').click();
+
+const llmDone = await waitFor(() => /完成：写回/.test($('status').textContent) ? $('status').textContent : null, 15000);
+check('大模型引擎翻译完成', !!llmDone, llmDone || $('status').textContent);
+check('请求发到了大模型端点', llmBodies.length === 1, `实际 ${llmBodies.length} 次`);
+const prompt = llmBodies.length ? llmBodies[0].messages.map((m) => m.content).join('\n') : '';
+check('提示词包含语境描述', /Net Wt\./.test(prompt), prompt.slice(0, 60));
+check('目标 / 源语言以自然语言名称写进提示词',
+  /翻译成 简体中文/.test(prompt), (prompt.match(/翻译成[^。]*/) || [''])[0]);
+check('提示词要求翻译贴合语境', /翻译必须贴合上述语境/.test(prompt), '');
+check('提示词包含同版面上下文段', prompt.indexOf('【同一版面的其他文案') >= 0, '');
+check('上下文带来了同对象的其他段落（模型据此判断场景）',
+  /Export the selected artwork/.test(prompt), '');
+check('模型译文被写回画布',
+  !!lastApplyPayload && lastApplyPayload.items[0].paragraphs[0].text === '【模】Save as',
+  lastApplyPayload ? JSON.stringify(lastApplyPayload.items[0].paragraphs) : 'null');
+
+/* ---------- 一键分析画布 ---------- */
+console.log('\n=== 语境：一键分析画布 ===');
+$('sceneText').value = '';
+$('glossary').value = '';
+llmBodies.length = 0;
+$('btnAnalyzeScene').click();
+
+const analyzed = await waitFor(() => /语境分析完成/.test($('status').textContent) ? $('status').textContent : null, 15000);
+check('分析画布成功', !!analyzed, analyzed || $('status').textContent);
+check('分析调用走的是语境分析提示词',
+  llmBodies.length === 1 && /本地化专家/.test(llmBodies[0].messages[0].content),
+  `实际 ${llmBodies.length} 次`);
+check('画布文字被作为样本送给模型',
+  llmBodies.length ? /Save as/.test(llmBodies[0].messages[1].content) : false, '');
+check('推断出的场景回填到语境输入框', /牙膏盒包装/.test($('sceneText').value), $('sceneText').value);
+check('语气与场景合成后写入', /简洁有力/.test($('sceneText').value), $('sceneText').value);
+check('模型给出的术语合并进术语表',
+  $('glossary').value.indexOf('Net wt.=净含量') >= 0, $('glossary').value);
+check('状态栏提示新增术语条数', /新增术语 1 条/.test(analyzed || ''), analyzed || '');
+
+/* ---------- 免费引擎：如实告知语境无效，但翻译照常 ---------- */
+console.log('\n=== 语境：免费引擎的降级提示 ===');
+$('engine').value = 'tencent';
+$('engine').dispatchEvent(new window.Event('change'));
+check('免费引擎徽标提示不支持语境',
+  $('ctxBadge').textContent === '当前引擎不支持', $('ctxBadge').textContent);
+const logBefore = doc.querySelectorAll('#log div').length;
+llmBodies.length = 0;
+$('btnScan').click();
+await waitIdle();
+$('btnTranslate').click();
+
+const freeDone = await waitFor(() => /完成：写回/.test($('status').textContent) ? $('status').textContent : null, 10000);
+check('填了语境时免费引擎仍能正常翻译', !!freeDone, freeDone || $('status').textContent);
+const newLog = Array.from(doc.querySelectorAll('#log div')).slice(logBefore).map((n) => n.textContent).join('\n');
+check('日志明确告知当前引擎无法接收语境指令',
+  /没有接收指令的通道|语境不会生效/.test(newLog), newLog.slice(0, 200));
+check('全程没有向大模型端点发请求', llmBodies.length === 0, String(llmBodies.length));
 
 /* ------------------------------------------------------------------ *
  * 汇总

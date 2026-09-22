@@ -284,7 +284,160 @@ test('分批遵循各引擎上限', () => {
 });
 
 /* ------------------------------------------------------------------ *
- * 8. 联网测试（真实引擎）
+ * 8. 语境翻译（大模型）
+ * ------------------------------------------------------------------ */
+section('语境：领域预设');
+
+test('领域预设结构合法且覆盖包装场景', () => {
+  truthy(core.DOMAIN_PRESETS.length >= 6, `至少 6 个预设，实际 ${core.DOMAIN_PRESETS.length}`);
+  core.DOMAIN_PRESETS.forEach((p) => {
+    eq(typeof p.id, 'string', `${p.label || '?'} 的 id 是字符串`);
+    truthy(!!p.label, `预设 ${p.id} 有名称`);
+    eq(typeof p.scene, 'string', `预设 ${p.id} 的 scene 是字符串`);
+  });
+  const pk = core.DOMAIN_PRESETS.find((p) => p.id === 'packaging');
+  truthy(!!pk, '存在产品包装预设');
+  truthy(/Net Wt\./.test(pk.scene), '包装预设含行业标示语提示（Net Wt.）');
+});
+
+section('语境：提示词注入');
+
+test('语境写进大模型提示词', () => {
+  const p = core.buildLlmPrompt([{ text: 'Save as' }], {
+    targetLangLabel: '简体中文',
+    scene: '牙膏盒包装文案，日化产品，面向消费者',
+  });
+  truthy(p.indexOf('【语境】') >= 0, '含语境标记');
+  truthy(p.indexOf('牙膏盒包装文案') >= 0, '含场景文本');
+  truthy(p.indexOf('选词') >= 0, '含「贴合语境」的指令');
+});
+
+test('语气与同版面上下文都写进提示词', () => {
+  const p = core.buildLlmPrompt([{ text: 'Net wt.' }], {
+    targetLangLabel: '简体中文',
+    scene: '产品包装',
+    tone: '简洁有力',
+    relatedContext: '清爽薄荷 / 净含量 120 克',
+  });
+  truthy(p.indexOf('【语气与风格】') >= 0, '含语气段');
+  truthy(p.indexOf('简洁有力') >= 0, '含语气文本');
+  truthy(p.indexOf('【同一版面的其他文案') >= 0, '含同版面上下文段');
+  truthy(p.indexOf('清爽薄荷') >= 0, '含上下文内容');
+});
+
+test('不填语境时提示词不含语境段（向后兼容）', () => {
+  const p = core.buildLlmPrompt([{ text: 'Save as' }], { targetLangLabel: '简体中文' });
+  truthy(p.indexOf('【语境】') < 0, '不应出现语境段');
+  truthy(p.indexOf('【语气与风格】') < 0, '不应出现语气段');
+  truthy(p.indexOf('【同一版面的其他文案') < 0, '不应出现上下文段');
+  truthy(p.indexOf('Save as') >= 0, '仍包含待翻译文本');
+});
+
+section('语境：同版面上下文');
+
+test('从 refs 收集同一对象的完整文案', () => {
+  const itemsById = {
+    itm1: { id: 'itm1', paragraphs: [{ text: '清爽薄荷' }, { text: '净含量 120 克' }] },
+    itm2: { id: 'itm2', paragraphs: [{ text: '使用方法' }] },
+  };
+  const batch = [{ text: '清爽薄荷', refs: [{ itemId: 'itm1' }] }];
+  const c = core.buildRelatedContext(batch, itemsById, 500);
+  truthy(c.indexOf('清爽薄荷') >= 0, '含本对象首段');
+  truthy(c.indexOf('净含量 120 克') >= 0, '含本对象其他段落');
+  truthy(c.indexOf('使用方法') < 0, '不含无关对象的文案');
+});
+
+test('上下文尊重长度上限', () => {
+  const itemsById = { itm1: { id: 'itm1', paragraphs: [{ text: 'A'.repeat(500) }] } };
+  const batch = [{ text: 'A', refs: [{ itemId: 'itm1' }] }];
+  const c = core.buildRelatedContext(batch, itemsById, 100);
+  truthy(c.length <= 140, `应被截断，实际 ${c.length} 字符`);
+});
+
+test('无线索时返回空字符串（不发多余上下文）', () => {
+  eq(core.buildRelatedContext([{ text: 'x' }], {}, 500), '');
+  eq(core.buildRelatedContext([{ text: 'x', refs: [{ itemId: 'nope' }] }], {}, 500), '');
+  eq(core.buildRelatedContext([], { itm1: { paragraphs: [{ text: 'a' }] } }, 500), '');
+});
+
+section('语境：分析结果解析');
+
+test('解析标准 JSON 结果', () => {
+  const r = core.parseContextAnalysis(
+    '{"scene":"牙膏盒包装文案","tone":"简洁有力","glossary":[{"from":"Net wt.","to":"净含量"}]}');
+  eq(r.scene, '牙膏盒包装文案');
+  eq(r.tone, '简洁有力');
+  eq(r.glossary.length, 1);
+  eq(r.glossary[0].from, 'Net wt.');
+  eq(r.glossary[0].to, '净含量');
+});
+
+test('容忍 md 围栏与前后解释文字', () => {
+  const raw = '好的，分析如下：\n```json\n{"scene":"化妆品包装","tone":"","glossary":[]}\n```\n希望有帮助。';
+  const r = core.parseContextAnalysis(raw);
+  eq(r.scene, '化妆品包装');
+  eq(r.glossary.length, 0);
+});
+
+test('术语字段别名兼容（terms / source / target）', () => {
+  const r = core.parseContextAnalysis('{"scene":"x","terms":[{"source":"Mint","target":"薄荷"}]}');
+  eq(r.glossary.length, 1);
+  eq(r.glossary[0].from, 'Mint');
+  eq(r.glossary[0].to, '薄荷');
+});
+
+test('无法解析时明确报错', () => {
+  let msg = '';
+  try { core.parseContextAnalysis('抱歉，我无法分析这段文字。'); } catch (e) { msg = e.message; }
+  truthy(/无法/.test(msg), `应提示无法解析，实际：${msg || '（没有报错）'}`);
+});
+
+test('场景描述与语气合成', () => {
+  eq(core.composeSceneText('包装文案', ''), '包装文案');
+  const s = core.composeSceneText('包装文案', '简洁有力');
+  truthy(s.indexOf('包装文案') >= 0 && s.indexOf('简洁有力') > 0, `合成结果：${s}`);
+});
+
+test('语境分析提示词要求输出场景与术语', () => {
+  const p = core.buildContextAnalysisPrompt(['清爽薄荷', '净含量 120 克'], {});
+  truthy(p.indexOf('清爽薄荷') >= 0, '含样本文案');
+  truthy(/scene/.test(p), '要求输出 scene');
+  truthy(/glossary/.test(p), '要求输出 glossary');
+});
+
+section('语境：引擎能力标记');
+
+test('只有大模型引擎支持语境', () => {
+  eq(engines.supportsContext('openai'), true);
+  eq(engines.supportsContext('tencent'), false);
+  eq(engines.supportsContext('bing'), false);
+  eq(engines.supportsContext('deepl'), false);
+  eq(engines.supportsContext('auto'), false);
+});
+
+test('引擎列表带 supportsContext 字段', () => {
+  const list = engines.engineList();
+  const llm = list.find((e) => e.id === 'openai');
+  truthy(llm && llm.supportsContext === true, '大模型引擎标记为支持');
+  const free = list.filter((e) => e.id !== 'openai');
+  truthy(free.every((e) => e.supportsContext === false), '免费引擎全部标记为不支持');
+});
+
+test('语言以自然语言名称写给模型（而非裸代码）', () => {
+  eq(engines.langLabel('en'), '英语');
+  eq(engines.langLabel('zh-CN'), '简体中文');
+  eq(engines.langLabel('auto'), '自动识别');
+  eq(engines.langLabel(''), '自动识别');
+  const p = core.buildLlmPrompt([{ text: 'x' }], {
+    targetLang: engines.langLabel('en'),
+    sourceLang: engines.langLabel('zh-CN'),
+  });
+  truthy(/翻译成 英语/.test(p), '目标语言用名称');
+  truthy(/源语言：简体中文/.test(p), '源语言用名称');
+});
+
+/* ------------------------------------------------------------------ *
+ * 9. 联网测试（真实引擎）
  * ------------------------------------------------------------------ */
 const args = process.argv.slice(2);
 const wantNetwork = args.includes('--network');

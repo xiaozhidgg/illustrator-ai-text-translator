@@ -126,7 +126,7 @@ pause
 }
 
 # ---------------------------------------------------------------- 说明文件
-$version = '1.0.0'
+$version = '1.1.0'
 try {
     $pkg = Get-Content (Join-Path $repoRoot 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($pkg.version) { $version = $pkg.version }

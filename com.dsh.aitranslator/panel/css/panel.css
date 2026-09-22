@@ -133,6 +133,88 @@ textarea {
 }
 
 /* ---------- 高级区 ---------- */
+/* ---------- 语境（场景） ---------- */
+.context-box {
+    border-top: 1px solid var(--border);
+    padding: 6px 0 8px;
+    flex: 0 0 auto;
+}
+
+.ctx-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 2px 10px 6px;
+}
+
+.ctx-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.ctx-badge {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    white-space: nowrap;
+}
+
+.ctx-badge.on {
+    color: var(--ok);
+    border-color: var(--ok);
+}
+
+.ctx-badge.off {
+    color: var(--warn);
+    border-color: var(--warn);
+}
+
+.ctx-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 10px 6px;
+}
+
+.ctx-row label {
+    flex: 0 0 auto;
+    color: var(--text-dim);
+    font-size: 11px;
+}
+
+.ctx-row select {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.context-box textarea {
+    width: calc(100% - 20px);
+    margin: 0 10px;
+    font-size: 11px;
+    line-height: 1.5;
+    resize: vertical;
+}
+
+.ctx-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px 0;
+}
+
+.ctx-hint {
+    flex: 1 1 auto;
+    text-align: right;
+    font-size: 10px;
+    color: var(--text-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
 .adv {
     border-top: 1px solid var(--border);
     border-bottom: 1px solid var(--border);
